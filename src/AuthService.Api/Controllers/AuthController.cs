@@ -29,6 +29,13 @@ public class AuthController : ControllerBase
         return Ok(result);
     }
 
+    [HttpPost("token")]
+    public async Task<ActionResult<ApiResponse<TokenResponseDto>>> Token([FromBody] OAuthTokenRequestDto requestDto)
+    {
+        var result = await _authService.TokenAsync(requestDto);
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
     [HttpPost("register")]
     public async Task<ActionResult<ApiResponse<string>>> Register([FromBody] RegisterDto registerDto)
     {
@@ -63,9 +70,16 @@ public class AuthController : ControllerBase
     }
 
     [HttpPost("refresh-token")]
-    public async Task<ActionResult<ApiResponse<string>>> RefreshToken([FromBody] RefreshTokenDto refreshTokenDto)
+    public async Task<ActionResult<ApiResponse<LoginResponseDto>>> RefreshToken([FromBody] RefreshTokenDto refreshTokenDto)
     {
         var result = await _authService.RefreshTokenAsync(refreshTokenDto);
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
+    [HttpPost("revoke")]
+    public async Task<ActionResult<ApiResponse<string>>> Revoke([FromBody] RefreshTokenDto refreshTokenDto)
+    {
+        var result = await _authService.RevokeTokenAsync(refreshTokenDto);
         return result.Success ? Ok(result) : BadRequest(result);
     }
 }

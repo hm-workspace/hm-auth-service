@@ -41,6 +41,22 @@ public class RefreshTokenDto
     public string RefreshToken { get; set; } = string.Empty;
 }
 
+public class OAuthTokenRequestDto
+{
+    public string GrantType { get; set; } = string.Empty;
+    public string? Username { get; set; }
+    public string? Password { get; set; }
+    public string? RefreshToken { get; set; }
+}
+
+public class TokenResponseDto
+{
+    public string AccessToken { get; set; } = string.Empty;
+    public string RefreshToken { get; set; } = string.Empty;
+    public string TokenType { get; set; } = "Bearer";
+    public int ExpiresIn { get; set; }
+}
+
 public class CreateUserDto
 {
     public string Username { get; set; } = string.Empty;

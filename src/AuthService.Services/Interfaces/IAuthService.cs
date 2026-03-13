@@ -6,11 +6,13 @@ namespace AuthService.Services.Interfaces;
 public interface IAuthService
 {
     Task<ApiResponse<LoginResponseDto>> LoginAsync(LoginDto loginDto);
+    Task<ApiResponse<TokenResponseDto>> TokenAsync(OAuthTokenRequestDto requestDto);
     Task<ApiResponse<string>> RegisterAsync(RegisterDto registerDto);
     Task<ApiResponse<string>> ForgotPasswordAsync(ForgotPasswordDto forgotPasswordDto);
     Task<ApiResponse<string>> ResetPasswordAsync(ResetPasswordDto resetPasswordDto);
     Task<ApiResponse<string>> ChangePasswordAsync(ChangePasswordDto changePasswordDto);
-    Task<ApiResponse<string>> RefreshTokenAsync(RefreshTokenDto refreshTokenDto);
+    Task<ApiResponse<LoginResponseDto>> RefreshTokenAsync(RefreshTokenDto refreshTokenDto);
+    Task<ApiResponse<string>> RevokeTokenAsync(RefreshTokenDto refreshTokenDto);
 
     Task<ApiResponse<PagedResult<UserDto>>> GetUsersAsync(SearchQuery searchQuery);
     Task<ApiResponse<UserDto>> GetUserAsync(int id);

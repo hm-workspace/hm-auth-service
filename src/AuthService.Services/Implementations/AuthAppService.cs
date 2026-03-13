@@ -1,6 +1,8 @@
 using System.IdentityModel.Tokens.Jwt;
+using System.Security.Cryptography;
 using System.Security.Claims;
 using System.Text;
+using System.Collections.Concurrent;
 using AuthService.InternalModels.DTOs;
 using AuthService.InternalModels.Entities;
 using AuthService.Repository.Interfaces;
@@ -13,6 +15,15 @@ namespace AuthService.Services.Implementations;
 
 public class AuthAppService : IAuthService
 {
+    private sealed class RefreshTokenSession
+    {
+        public int UserId { get; set; }
+        public DateTime ExpiresAtUtc { get; set; }
+        public bool IsRevoked { get; set; }
+    }
+
+    private static readonly ConcurrentDictionary<string, RefreshTokenSession> RefreshTokenStore = new();
+
     private readonly IUserRepository _userRepository;
     private readonly IConfiguration _configuration;
 
@@ -48,9 +59,62 @@ public class AuthAppService : IAuthService
         return tokenHandler.WriteToken(securityToken);
     }
 
-    private static string GenerateRefreshToken() =>
-        Convert.ToBase64String(Guid.NewGuid().ToByteArray()) +
-        Convert.ToBase64String(Guid.NewGuid().ToByteArray());
+    private static string GenerateRefreshToken()
+    {
+        var randomBytes = RandomNumberGenerator.GetBytes(64);
+        return Convert.ToBase64String(randomBytes);
+    }
+
+    private static string HashToken(string token)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(token));
+        return Convert.ToHexString(bytes);
+    }
+
+    private int GetAccessTokenExpiryMinutes()
+    {
+        var raw = _configuration["JwtSettings:ExpiryMinutes"];
+        return int.TryParse(raw, out var value) && value > 0 ? value : 60;
+    }
+
+    private int GetRefreshTokenExpiryDays()
+    {
+        var raw = _configuration["JwtSettings:RefreshTokenExpiryDays"];
+        return int.TryParse(raw, out var value) && value > 0 ? value : 7;
+    }
+
+    private string CreateAndStoreRefreshToken(int userId)
+    {
+        var token = GenerateRefreshToken();
+        var hashed = HashToken(token);
+        RefreshTokenStore[hashed] = new RefreshTokenSession
+        {
+            UserId = userId,
+            ExpiresAtUtc = DateTime.UtcNow.AddDays(GetRefreshTokenExpiryDays()),
+            IsRevoked = false
+        };
+        return token;
+    }
+
+    private static void CleanupExpiredRefreshTokens()
+    {
+        var now = DateTime.UtcNow;
+        foreach (var kvp in RefreshTokenStore)
+        {
+            if (kvp.Value.ExpiresAtUtc <= now || kvp.Value.IsRevoked)
+            {
+                RefreshTokenStore.TryRemove(kvp.Key, out _);
+            }
+        }
+    }
+
+    private static TokenResponseDto ToTokenResponse(LoginResponseDto loginResponse, int expiryMinutes) => new()
+    {
+        AccessToken = loginResponse.Token,
+        RefreshToken = loginResponse.RefreshToken,
+        TokenType = "Bearer",
+        ExpiresIn = expiryMinutes * 60
+    };
 
     public async Task<ApiResponse<LoginResponseDto>> LoginAsync(LoginDto loginDto)
     {
@@ -65,13 +129,65 @@ public class AuthAppService : IAuthService
         await _userRepository.UpdateAsync(user);
 
         var token = GenerateJwtToken(user);
-        var refreshToken = GenerateRefreshToken();
+        var refreshToken = CreateAndStoreRefreshToken(user.Id);
         return ApiResponse<LoginResponseDto>.Ok(new LoginResponseDto
         {
             Token = token,
             RefreshToken = refreshToken,
             User = UserDto.FromEntity(user)
         }, "Login successful");
+    }
+
+    public async Task<ApiResponse<TokenResponseDto>> TokenAsync(OAuthTokenRequestDto requestDto)
+    {
+        if (requestDto is null || string.IsNullOrWhiteSpace(requestDto.GrantType))
+        {
+            return ApiResponse<TokenResponseDto>.Fail("grant_type is required");
+        }
+
+        var grantType = requestDto.GrantType.Trim().ToLowerInvariant();
+        if (grantType == "password")
+        {
+            if (string.IsNullOrWhiteSpace(requestDto.Username) || string.IsNullOrWhiteSpace(requestDto.Password))
+            {
+                return ApiResponse<TokenResponseDto>.Fail("username and password are required for password grant");
+            }
+
+            var loginResult = await LoginAsync(new LoginDto
+            {
+                Email = requestDto.Username,
+                Password = requestDto.Password
+            });
+
+            if (!loginResult.Success || loginResult.Data is null)
+            {
+                return ApiResponse<TokenResponseDto>.Fail(loginResult.Message);
+            }
+
+            return ApiResponse<TokenResponseDto>.Ok(
+                ToTokenResponse(loginResult.Data, GetAccessTokenExpiryMinutes()),
+                "Token issued");
+        }
+
+        if (grantType == "refresh_token")
+        {
+            if (string.IsNullOrWhiteSpace(requestDto.RefreshToken))
+            {
+                return ApiResponse<TokenResponseDto>.Fail("refresh_token is required for refresh_token grant");
+            }
+
+            var refreshResult = await RefreshTokenAsync(new RefreshTokenDto { RefreshToken = requestDto.RefreshToken });
+            if (!refreshResult.Success || refreshResult.Data is null)
+            {
+                return ApiResponse<TokenResponseDto>.Fail(refreshResult.Message);
+            }
+
+            return ApiResponse<TokenResponseDto>.Ok(
+                ToTokenResponse(refreshResult.Data, GetAccessTokenExpiryMinutes()),
+                "Token refreshed");
+        }
+
+        return ApiResponse<TokenResponseDto>.Fail("Unsupported grant_type. Allowed values: password, refresh_token");
     }
 
     public async Task<ApiResponse<string>> RegisterAsync(RegisterDto registerDto)
@@ -135,17 +251,61 @@ public class AuthAppService : IAuthService
         return ApiResponse<string>.Ok("Password has been changed successfully");
     }
 
-    public Task<ApiResponse<string>> RefreshTokenAsync(RefreshTokenDto refreshTokenDto)
+    public async Task<ApiResponse<LoginResponseDto>> RefreshTokenAsync(RefreshTokenDto refreshTokenDto)
+    {
+        if (string.IsNullOrWhiteSpace(refreshTokenDto.RefreshToken))
+        {
+            return ApiResponse<LoginResponseDto>.Fail("Refresh token is required");
+        }
+
+        CleanupExpiredRefreshTokens();
+
+        var hashed = HashToken(refreshTokenDto.RefreshToken);
+        if (!RefreshTokenStore.TryGetValue(hashed, out var session))
+        {
+            return ApiResponse<LoginResponseDto>.Fail("Invalid refresh token");
+        }
+
+        if (session.IsRevoked || session.ExpiresAtUtc <= DateTime.UtcNow)
+        {
+            RefreshTokenStore.TryRemove(hashed, out _);
+            return ApiResponse<LoginResponseDto>.Fail("Refresh token has expired or was revoked");
+        }
+
+        var user = await _userRepository.GetByIdAsync(session.UserId);
+        if (user is null || !user.IsActive)
+        {
+            RefreshTokenStore.TryRemove(hashed, out _);
+            return ApiResponse<LoginResponseDto>.Fail("User is not active");
+        }
+
+        session.IsRevoked = true;
+        var newRefreshToken = CreateAndStoreRefreshToken(user.Id);
+        var newAccessToken = GenerateJwtToken(user);
+
+        return ApiResponse<LoginResponseDto>.Ok(new LoginResponseDto
+        {
+            Token = newAccessToken,
+            RefreshToken = newRefreshToken,
+            User = UserDto.FromEntity(user)
+        }, "Token refreshed");
+    }
+
+    public Task<ApiResponse<string>> RevokeTokenAsync(RefreshTokenDto refreshTokenDto)
     {
         if (string.IsNullOrWhiteSpace(refreshTokenDto.RefreshToken))
         {
             return Task.FromResult(ApiResponse<string>.Fail("Refresh token is required"));
         }
 
-        // Refresh token rotation: issue a new refresh token alongside a new access token placeholder.
-        // A full implementation would validate the refresh token against a persisted store.
-        var newRefreshToken = GenerateRefreshToken();
-        return Task.FromResult(ApiResponse<string>.Ok(newRefreshToken, "Token refreshed. Use the refresh token to obtain a new access token via /api/auth/login."));
+        var hashed = HashToken(refreshTokenDto.RefreshToken);
+        if (RefreshTokenStore.TryGetValue(hashed, out var session))
+        {
+            session.IsRevoked = true;
+            RefreshTokenStore.TryRemove(hashed, out _);
+        }
+
+        return Task.FromResult(ApiResponse<string>.Ok("Token revoked"));
     }
 
     public async Task<ApiResponse<PagedResult<UserDto>>> GetUsersAsync(SearchQuery searchQuery)
