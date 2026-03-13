@@ -12,35 +12,6 @@ public class DapperRefreshTokenRepository : IRefreshTokenRepository
     public DapperRefreshTokenRepository(IDbConnectionFactory connectionFactory)
     {
         _connectionFactory = connectionFactory;
-        EnsureTableExists();
-    }
-
-    private void EnsureTableExists()
-    {
-        try
-        {
-            using var connection = _connectionFactory.CreateConnection();
-            const string sql = @"
-IF OBJECT_ID('RefreshTokens', 'U') IS NULL
-BEGIN
-    CREATE TABLE RefreshTokens
-    (
-        TokenHash NVARCHAR(128) NOT NULL PRIMARY KEY,
-        UserId INT NOT NULL,
-        ExpiresAtUtc DATETIME2 NOT NULL,
-        CreatedAtUtc DATETIME2 NOT NULL,
-        RevokedAtUtc DATETIME2 NULL
-    );
-
-    CREATE INDEX IX_RefreshTokens_UserId ON RefreshTokens(UserId);
-    CREATE INDEX IX_RefreshTokens_ExpiresAtUtc ON RefreshTokens(ExpiresAtUtc);
-END";
-            connection.Execute(sql);
-        }
-        catch
-        {
-            // Ignore table bootstrap errors and rely on in-memory fallback paths.
-        }
     }
 
     public async Task CreateAsync(RefreshTokenEntity refreshToken)
