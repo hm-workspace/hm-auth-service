@@ -4,5 +4,6 @@ namespace AuthService.Data;
 
 public interface IDbConnectionFactory
 {
-    IDbConnection CreateConnection();
+    IDbConnection CreateConnection(string connectionName = "DefaultConnection");
 }
+
