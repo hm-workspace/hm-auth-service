@@ -1,13 +1,17 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
-
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
-
   <ItemGroup>
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
   </ItemGroup>
-
+  <ItemGroup>
+    <ProjectReference Include="..\AuthService.Data\AuthService.Data.csproj" />
+    <ProjectReference Include="..\AuthService.Repository\AuthService.Repository.csproj" />
+    <ProjectReference Include="..\AuthService.Services\AuthService.Services.csproj" />
+    <ProjectReference Include="..\AuthService.InternalModels\AuthService.InternalModels.csproj" />
+    <ProjectReference Include="..\AuthService.Utils\AuthService.Utils.csproj" />
+  </ItemGroup>
 </Project>
