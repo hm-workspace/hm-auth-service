@@ -33,6 +33,7 @@ builder.Services.AddAuthorization();
 builder.Services.AddControllers();
 builder.Services.AddScoped<IDbConnectionFactory, SqlConnectionFactory>();
 builder.Services.AddScoped<IUserRepository, DapperUserRepository>();
+builder.Services.AddScoped<IRefreshTokenRepository, DapperRefreshTokenRepository>();
 builder.Services.AddScoped<IAuthService, AuthAppService>();
 
 builder.Services.AddEndpointsApiExplorer();

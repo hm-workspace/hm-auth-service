@@ -188,6 +188,7 @@ WHERE Id=@Id";
 internal static class InMemoryAuthStore
 {
     public static int UserSeed = 1;
+    public static readonly Dictionary<string, RefreshTokenEntity> RefreshTokens = new(StringComparer.Ordinal);
     public static readonly List<UserEntity> Users =
     [
         new UserEntity

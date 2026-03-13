@@ -2,7 +2,6 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Cryptography;
 using System.Security.Claims;
 using System.Text;
-using System.Collections.Concurrent;
 using AuthService.InternalModels.DTOs;
 using AuthService.InternalModels.Entities;
 using AuthService.Repository.Interfaces;
@@ -15,21 +14,17 @@ namespace AuthService.Services.Implementations;
 
 public class AuthAppService : IAuthService
 {
-    private sealed class RefreshTokenSession
-    {
-        public int UserId { get; set; }
-        public DateTime ExpiresAtUtc { get; set; }
-        public bool IsRevoked { get; set; }
-    }
-
-    private static readonly ConcurrentDictionary<string, RefreshTokenSession> RefreshTokenStore = new();
-
     private readonly IUserRepository _userRepository;
+    private readonly IRefreshTokenRepository _refreshTokenRepository;
     private readonly IConfiguration _configuration;
 
-    public AuthAppService(IUserRepository userRepository, IConfiguration configuration)
+    public AuthAppService(
+        IUserRepository userRepository,
+        IRefreshTokenRepository refreshTokenRepository,
+        IConfiguration configuration)
     {
         _userRepository = userRepository;
+        _refreshTokenRepository = refreshTokenRepository;
         _configuration = configuration;
     }
 
@@ -83,29 +78,23 @@ public class AuthAppService : IAuthService
         return int.TryParse(raw, out var value) && value > 0 ? value : 7;
     }
 
-    private string CreateAndStoreRefreshToken(int userId)
+    private async Task<string> CreateAndStoreRefreshTokenAsync(int userId)
     {
         var token = GenerateRefreshToken();
         var hashed = HashToken(token);
-        RefreshTokenStore[hashed] = new RefreshTokenSession
+        await _refreshTokenRepository.CreateAsync(new RefreshTokenEntity
         {
             UserId = userId,
             ExpiresAtUtc = DateTime.UtcNow.AddDays(GetRefreshTokenExpiryDays()),
-            IsRevoked = false
-        };
+            CreatedAtUtc = DateTime.UtcNow,
+            TokenHash = hashed
+        });
         return token;
     }
 
-    private static void CleanupExpiredRefreshTokens()
+    private async Task CleanupExpiredRefreshTokensAsync()
     {
-        var now = DateTime.UtcNow;
-        foreach (var kvp in RefreshTokenStore)
-        {
-            if (kvp.Value.ExpiresAtUtc <= now || kvp.Value.IsRevoked)
-            {
-                RefreshTokenStore.TryRemove(kvp.Key, out _);
-            }
-        }
+        await _refreshTokenRepository.DeleteExpiredOrRevokedAsync();
     }
 
     private static TokenResponseDto ToTokenResponse(LoginResponseDto loginResponse, int expiryMinutes) => new()
@@ -129,7 +118,7 @@ public class AuthAppService : IAuthService
         await _userRepository.UpdateAsync(user);
 
         var token = GenerateJwtToken(user);
-        var refreshToken = CreateAndStoreRefreshToken(user.Id);
+        var refreshToken = await CreateAndStoreRefreshTokenAsync(user.Id);
         return ApiResponse<LoginResponseDto>.Ok(new LoginResponseDto
         {
             Token = token,
@@ -258,29 +247,30 @@ public class AuthAppService : IAuthService
             return ApiResponse<LoginResponseDto>.Fail("Refresh token is required");
         }
 
-        CleanupExpiredRefreshTokens();
+        await CleanupExpiredRefreshTokensAsync();
 
         var hashed = HashToken(refreshTokenDto.RefreshToken);
-        if (!RefreshTokenStore.TryGetValue(hashed, out var session))
+        var session = await _refreshTokenRepository.GetByTokenHashAsync(hashed);
+        if (session is null)
         {
             return ApiResponse<LoginResponseDto>.Fail("Invalid refresh token");
         }
 
-        if (session.IsRevoked || session.ExpiresAtUtc <= DateTime.UtcNow)
+        if (session.IsRevoked || session.IsExpired)
         {
-            RefreshTokenStore.TryRemove(hashed, out _);
+            await _refreshTokenRepository.RevokeAsync(hashed);
             return ApiResponse<LoginResponseDto>.Fail("Refresh token has expired or was revoked");
         }
 
         var user = await _userRepository.GetByIdAsync(session.UserId);
         if (user is null || !user.IsActive)
         {
-            RefreshTokenStore.TryRemove(hashed, out _);
+            await _refreshTokenRepository.RevokeAsync(hashed);
             return ApiResponse<LoginResponseDto>.Fail("User is not active");
         }
 
-        session.IsRevoked = true;
-        var newRefreshToken = CreateAndStoreRefreshToken(user.Id);
+        await _refreshTokenRepository.RevokeAsync(hashed);
+        var newRefreshToken = await CreateAndStoreRefreshTokenAsync(user.Id);
         var newAccessToken = GenerateJwtToken(user);
 
         return ApiResponse<LoginResponseDto>.Ok(new LoginResponseDto
@@ -298,14 +288,14 @@ public class AuthAppService : IAuthService
             return Task.FromResult(ApiResponse<string>.Fail("Refresh token is required"));
         }
 
-        var hashed = HashToken(refreshTokenDto.RefreshToken);
-        if (RefreshTokenStore.TryGetValue(hashed, out var session))
-        {
-            session.IsRevoked = true;
-            RefreshTokenStore.TryRemove(hashed, out _);
-        }
+        return RevokeInternalAsync(refreshTokenDto.RefreshToken);
+    }
 
-        return Task.FromResult(ApiResponse<string>.Ok("Token revoked"));
+    private async Task<ApiResponse<string>> RevokeInternalAsync(string refreshToken)
+    {
+        var hashed = HashToken(refreshToken);
+        await _refreshTokenRepository.RevokeAsync(hashed);
+        return ApiResponse<string>.Ok("Token revoked");
     }
 
     public async Task<ApiResponse<PagedResult<UserDto>>> GetUsersAsync(SearchQuery searchQuery)
