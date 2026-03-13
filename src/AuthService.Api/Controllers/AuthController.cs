@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using AuthService.InternalModels.DTOs;
 using AuthService.Services.Interfaces;
 using AuthService.Utils.Common;
@@ -69,6 +70,7 @@ public class AuthController : ControllerBase
     }
 }
 
+[Authorize]
 [ApiController]
 [Route("api/users")]
 public class UsersController : ControllerBase

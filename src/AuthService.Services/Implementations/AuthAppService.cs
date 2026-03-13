@@ -1,19 +1,56 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text;
 using AuthService.InternalModels.DTOs;
 using AuthService.InternalModels.Entities;
 using AuthService.Repository.Interfaces;
 using AuthService.Services.Interfaces;
 using AuthService.Utils.Common;
+using Microsoft.Extensions.Configuration;
+using Microsoft.IdentityModel.Tokens;
 
 namespace AuthService.Services.Implementations;
 
 public class AuthAppService : IAuthService
 {
     private readonly IUserRepository _userRepository;
+    private readonly IConfiguration _configuration;
 
-    public AuthAppService(IUserRepository userRepository)
+    public AuthAppService(IUserRepository userRepository, IConfiguration configuration)
     {
         _userRepository = userRepository;
+        _configuration = configuration;
     }
+
+    private string GenerateJwtToken(UserEntity user)
+    {
+        var jwtSettings = _configuration.GetSection("JwtSettings");
+        var key = Encoding.UTF8.GetBytes(jwtSettings["SecretKey"]!);
+        var tokenHandler = new JwtSecurityTokenHandler();
+        var tokenDescriptor = new SecurityTokenDescriptor
+        {
+            Subject = new ClaimsIdentity(new[]
+            {
+                new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
+                new Claim(JwtRegisteredClaimNames.Email, user.Email),
+                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+                new Claim(ClaimTypes.Name, user.Username),
+                new Claim(ClaimTypes.Role, user.RoleName)
+            }),
+            Expires = DateTime.UtcNow.AddMinutes(double.Parse(jwtSettings["ExpiryMinutes"]!)),
+            Issuer = jwtSettings["Issuer"],
+            Audience = jwtSettings["Audience"],
+            SigningCredentials = new SigningCredentials(
+                new SymmetricSecurityKey(key),
+                SecurityAlgorithms.HmacSha256Signature)
+        };
+        var securityToken = tokenHandler.CreateToken(tokenDescriptor);
+        return tokenHandler.WriteToken(securityToken);
+    }
+
+    private static string GenerateRefreshToken() =>
+        Convert.ToBase64String(Guid.NewGuid().ToByteArray()) +
+        Convert.ToBase64String(Guid.NewGuid().ToByteArray());
 
     public async Task<ApiResponse<LoginResponseDto>> LoginAsync(LoginDto loginDto)
     {
@@ -27,8 +64,8 @@ public class AuthAppService : IAuthService
         user.UpdatedAt = DateTime.UtcNow;
         await _userRepository.UpdateAsync(user);
 
-        var token = Convert.ToBase64String(Guid.NewGuid().ToByteArray());
-        var refreshToken = Convert.ToBase64String(Guid.NewGuid().ToByteArray());
+        var token = GenerateJwtToken(user);
+        var refreshToken = GenerateRefreshToken();
         return ApiResponse<LoginResponseDto>.Ok(new LoginResponseDto
         {
             Token = token,
@@ -105,8 +142,10 @@ public class AuthAppService : IAuthService
             return Task.FromResult(ApiResponse<string>.Fail("Refresh token is required"));
         }
 
-        var token = Convert.ToBase64String(Guid.NewGuid().ToByteArray());
-        return Task.FromResult(ApiResponse<string>.Ok(token, "Token refreshed"));
+        // Refresh token rotation: issue a new refresh token alongside a new access token placeholder.
+        // A full implementation would validate the refresh token against a persisted store.
+        var newRefreshToken = GenerateRefreshToken();
+        return Task.FromResult(ApiResponse<string>.Ok(newRefreshToken, "Token refreshed. Use the refresh token to obtain a new access token via /api/auth/login."));
     }
 
     public async Task<ApiResponse<PagedResult<UserDto>>> GetUsersAsync(SearchQuery searchQuery)
