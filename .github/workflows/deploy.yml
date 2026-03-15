@@ -1,0 +1,145 @@
+name: Build & Deploy
+
+on:
+  push:
+    branches: [main, develop]
+    tags: ['v*.*.*']
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  SERVICE_NAME: auth-service
+  DEV_CLUSTER: hospital-mgmt-dev-cluster
+  PROD_CLUSTER: hospital-mgmt-prod-cluster
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore -c Release
+
+      - name: Test
+        run: dotnet test --no-build -c Release --verbosity minimal
+
+  push-dev:
+    if: github.ref == 'refs/heads/develop'
+    needs: build-test
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.gitversion.outputs.semVer }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: gittools/actions/gitversion/setup@v3
+        with:
+          versionSpec: '6.x'
+
+      - id: gitversion
+        uses: gittools/actions/gitversion/execute@v3
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push dev image
+        run: |
+          ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+          REPO="${ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com/${SERVICE_NAME}"
+          TAG="${{ steps.gitversion.outputs.semVer }}"
+          docker build -t "${REPO}:${TAG}" \
+                       -t "${REPO}:sha-${{ github.sha }}" \
+                       -t "${REPO}:dev-latest" \
+                       .
+          docker push "${REPO}" --all-tags
+
+  deploy-dev:
+    if: github.ref == 'refs/heads/develop'
+    needs: push-dev
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Force new ECS deployment (dev)
+        run: |
+          aws ecs update-service \
+            --cluster "${{ env.DEV_CLUSTER }}" \
+            --service "hospital-mgmt-dev-${{ env.SERVICE_NAME }}" \
+            --force-new-deployment
+
+  push-prod:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build-test
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.gitversion.outputs.semVer }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: gittools/actions/gitversion/setup@v3
+        with:
+          versionSpec: '6.x'
+
+      - id: gitversion
+        uses: gittools/actions/gitversion/execute@v3
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push prod image
+        run: |
+          ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+          REPO="${ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com/${SERVICE_NAME}"
+          TAG="${{ steps.gitversion.outputs.semVer }}"
+          docker build -t "${REPO}:${TAG}" \
+                       -t "${REPO}:sha-${{ github.sha }}" \
+                       -t "${REPO}:latest" \
+                       .
+          docker push "${REPO}" --all-tags
+
+  deploy-prod:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: push-prod
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Force new ECS deployment (prod)
+        run: |
+          aws ecs update-service \
+            --cluster "${{ env.PROD_CLUSTER }}" \
+            --service "hospital-mgmt-prod-${{ env.SERVICE_NAME }}" \
+            --force-new-deployment
