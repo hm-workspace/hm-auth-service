@@ -1,4 +1,4 @@
-name: Build & Deploy
+﻿name: Build & Deploy
 
 on:
   push:
@@ -37,7 +37,7 @@ jobs:
         run: dotnet test --no-build -c Release --verbosity minimal
 
   push-dev:
-    if: github.ref == 'refs/heads/develop'
+    if: github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main'
     needs: build-test
     runs-on: ubuntu-latest
     outputs:
@@ -73,7 +73,7 @@ jobs:
           docker push "${REPO}" --all-tags
 
   deploy-dev:
-    if: github.ref == 'refs/heads/develop'
+    if: github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main'
     needs: push-dev
     runs-on: ubuntu-latest
     environment: dev
