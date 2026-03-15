@@ -62,8 +62,15 @@ builder.Services.AddSwaggerGen(options =>
 
 var app = builder.Build();
 
-app.UseSwagger();
-app.UseSwaggerUI();
+app.UseSwagger(options =>
+{
+    options.RouteTemplate = "api/auth/swagger/{documentName}/swagger.json";
+});
+app.UseSwaggerUI(options =>
+{
+    options.SwaggerEndpoint("/api/auth/swagger/v1/swagger.json", "Auth Service API v1");
+    options.RoutePrefix = "api/auth/swagger";
+});
 
 app.UseHttpsRedirection();
 
