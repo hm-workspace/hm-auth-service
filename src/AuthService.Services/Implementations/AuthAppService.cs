@@ -115,7 +115,7 @@ public class AuthAppService : IAuthService
 
         user.LastLogin = DateTime.UtcNow;
         user.UpdatedAt = DateTime.UtcNow;
-        await _userRepository.UpdateAsync(user);
+        await _userRepository.UpdateLastLoginAsync(user.Id, user.LastLogin ?? DateTime.Now);
 
         var token = GenerateJwtToken(user);
         var refreshToken = await CreateAndStoreRefreshTokenAsync(user.Id);

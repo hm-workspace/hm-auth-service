@@ -10,6 +10,7 @@ public interface IUserRepository
     Task<PagedResult<UserEntity>> GetPagedAsync(SearchQuery searchQuery);
     Task<int> CreateAsync(UserEntity user);
     Task<bool> UpdateAsync(UserEntity user);
+    Task<bool> UpdateLastLoginAsync(int id, DateTime lastLogin);
     Task<bool> DeleteAsync(int id);
     Task<bool> SetActiveAsync(int id, bool isActive);
 }

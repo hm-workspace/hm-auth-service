@@ -1,9 +1,12 @@
 using System.Text;
+using System.Text.Json.Serialization;
+using AuthService.Api.Middleware;
 using AuthService.Data;
 using AuthService.Repository.Implementations;
 using AuthService.Repository.Interfaces;
 using AuthService.Services.Implementations;
 using AuthService.Services.Interfaces;
+using AuthService.Utils.Localization;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
@@ -30,10 +33,21 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     });
 builder.Services.AddAuthorization();
 
-builder.Services.AddControllers();
+// Register Culture Service
+builder.Services.AddSingleton<ICultureService, CultureService>();
+
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        // Add custom DateTime converter that uses culture service
+        // Note: The converter will be added per-request in the middleware
+        options.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
+        options.JsonSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
+    });
+
 builder.Services.AddScoped<IDbConnectionFactory, SqlConnectionFactory>();
-builder.Services.AddScoped<IUserRepository, DapperUserRepository>();
-builder.Services.AddScoped<IRefreshTokenRepository, DapperRefreshTokenRepository>();
+builder.Services.AddScoped<IUserRepository, UserRepository>();
+builder.Services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
 builder.Services.AddScoped<IAuthService, AuthAppService>();
 
 builder.Services.AddEndpointsApiExplorer();
@@ -62,6 +76,11 @@ builder.Services.AddSwaggerGen(options =>
 
 var app = builder.Build();
 
+if (app.Environment.IsDevelopment())
+{
+    app.UseDeveloperExceptionPage();
+}
+
 app.UseSwagger(options =>
 {
     options.RouteTemplate = "api/auth/swagger/{documentName}/swagger.json";
@@ -73,6 +92,9 @@ app.UseSwaggerUI(options =>
 });
 
 app.UseHttpsRedirection();
+
+// Add Culture Middleware (before authentication)
+app.UseMiddleware<CultureMiddleware>();
 
 app.UseAuthentication();
 app.UseAuthorization();
