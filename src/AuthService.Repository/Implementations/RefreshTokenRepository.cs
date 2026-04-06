@@ -16,11 +16,20 @@ public class RefreshTokenRepository : BaseRepository, IRefreshTokenRepository
 
     public Task CreateAsync(RefreshTokenEntity refreshToken)
     {
+        var parameters = new
+        {
+            refreshToken.TokenHash,
+            refreshToken.UserId,
+            refreshToken.ExpiresAtUtc,
+            refreshToken.CreatedAtUtc,
+            refreshToken.RevokedAtUtc
+        };
+
         return ExecuteWithConnectionAsync(
             async connection =>
                 await connection.ExecuteAsync(
                     StoredProcedureNames.CreateRefreshToken,
-                    refreshToken,
+                    parameters,
                     commandType: CommandType.StoredProcedure));
     }
 
