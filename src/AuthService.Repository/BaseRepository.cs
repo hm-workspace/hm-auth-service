@@ -105,41 +105,57 @@ public abstract class BaseRepository
     /// <summary>
     /// Helper method for Dapper QuerySingleOrDefaultAsync
     /// </summary>
-    protected Task<T?> QuerySingleOrDefaultAsync<T>(string sql, object? param = null, Func<T?>? fallback = null)
+    protected Task<T?> QuerySingleOrDefaultAsync<T>(
+        string sql,
+        object? param = null,
+        Func<T?>? fallback = null,
+        CommandType? commandType = null)
         where T : class
     {
         return ExecuteWithConnectionAsync(
-            async connection => await connection.QuerySingleOrDefaultAsync<T>(sql, param),
+            async connection => await connection.QuerySingleOrDefaultAsync<T>(sql, param, commandType: commandType),
             fallback ?? (() => default(T)));
     }
 
     /// <summary>
     /// Helper method for Dapper QueryAsync
     /// </summary>
-    protected Task<IEnumerable<T>> QueryAsync<T>(string sql, object? param = null, Func<IEnumerable<T>>? fallback = null)
+    protected Task<IEnumerable<T>> QueryAsync<T>(
+        string sql,
+        object? param = null,
+        Func<IEnumerable<T>>? fallback = null,
+        CommandType? commandType = null)
     {
         return ExecuteWithConnectionAsync(
-            async connection => await connection.QueryAsync<T>(sql, param),
+            async connection => await connection.QueryAsync<T>(sql, param, commandType: commandType),
             fallback ?? (() => Enumerable.Empty<T>()));
     }
 
     /// <summary>
     /// Helper method for Dapper ExecuteAsync
     /// </summary>
-    protected Task<int> ExecuteAsync(string sql, object? param = null, Func<int>? fallback = null)
+    protected Task<int> ExecuteAsync(
+        string sql,
+        object? param = null,
+        Func<int>? fallback = null,
+        CommandType? commandType = null)
     {
         return ExecuteWithConnectionAsync(
-            async connection => await connection.ExecuteAsync(sql, param),
+            async connection => await connection.ExecuteAsync(sql, param, commandType: commandType),
             fallback ?? (() => 0));
     }
 
     /// <summary>
     /// Helper method for Dapper ExecuteScalarAsync
     /// </summary>
-    protected Task<T> ExecuteScalarAsync<T>(string sql, object? param = null, Func<T>? fallback = null)
+    protected Task<T> ExecuteScalarAsync<T>(
+        string sql,
+        object? param = null,
+        Func<T>? fallback = null,
+        CommandType? commandType = null)
     {
         return ExecuteWithConnectionAsync(
-            async connection => await connection.ExecuteScalarAsync<T>(sql, param),
+            async connection => await connection.ExecuteScalarAsync<T>(sql, param, commandType: commandType),
             fallback ?? (() => default(T)!));
     }
 }
