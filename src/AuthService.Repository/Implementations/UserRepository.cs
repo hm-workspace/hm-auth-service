@@ -8,18 +8,32 @@ namespace AuthService.Repository.Implementations;
 
 public class UserRepository : BaseRepository, IUserRepository
 {
-    public UserRepository(IDbConnectionFactory connectionFactory) 
+    public UserRepository(IDbConnectionFactory connectionFactory)
         : base(connectionFactory)
     {
     }
 
     public Task<UserEntity?> GetByIdAsync(int id)
     {
-        const string sql = @"SELECT Id, Username, Email, Password, FirstName, LastName, Phone, RoleName, IsActive, LastLogin, CreatedAt, UpdatedAt
-FROM Users WHERE Id = @Id";
+        const string sql = @"SELECT
+    U.Id,
+    U.Username,
+    U.Email,
+    U.Password,
+    U.FirstName,
+    U.LastName,
+    U.Phone,
+    R.RoleName AS RoleName,
+    U.IsActive,
+    U.LastLogin,
+    U.CreatedAt,
+    U.UpdatedAt
+FROM Users U
+JOIN [dbo].[roles] R ON U.roleid = R.id
+WHERE U.Id = @Id";
 
         return QuerySingleOrDefaultAsync<UserEntity>(
-            sql, 
+            sql,
             new { Id = id },
             () => InMemoryAuthStore.Users.FirstOrDefault(x => x.Id == id));
     }
@@ -28,19 +42,19 @@ FROM Users WHERE Id = @Id";
     {
         const string sql = @"SELECT 
 	                            U.Id, 
-	                            Username, 
-	                            Email, 
-	                            Password, 
-	                            FirstName,
-	                            LastName, 
-	                            Phone, 
-	                            RoleName, 
+                                U.Username, 
+                                U.Email, 
+                                U.Password, 
+                                U.FirstName,
+                                U.LastName, 
+                                U.Phone, 
+                                UR.RoleName AS RoleName, 
 	                            U.IsActive, 
-	                            LastLogin, 
+                                U.LastLogin, 
 	                            U.CreatedAt, 
-	                            UpdatedAt
+                                U.UpdatedAt
                             FROM Users U JOIN [dbo].[roles] UR ON U.roleid=UR.id
-                            WHERE LOWER(Email) = LOWER(@Email)";
+                            WHERE LOWER(U.Email) = LOWER(@Email)";
 
         return QuerySingleOrDefaultAsync<UserEntity>(
             sql,
@@ -51,14 +65,27 @@ FROM Users WHERE Id = @Id";
     public async Task<PagedResult<UserEntity>> GetPagedAsync(SearchQuery searchQuery)
     {
         var term = string.IsNullOrWhiteSpace(searchQuery.SearchTerm) ? null : $"%{searchQuery.SearchTerm}%";
-        const string dataSql = @"SELECT Id, Username, Email, Password, FirstName, LastName, Phone, RoleName, IsActive, LastLogin, CreatedAt, UpdatedAt
-FROM Users
-WHERE @Term IS NULL OR Email LIKE @Term OR FirstName LIKE @Term OR LastName LIKE @Term
-ORDER BY Id
+        const string dataSql = @"SELECT
+    U.Id,
+    U.Username,
+    U.Email,
+    U.Password,
+    U.FirstName,
+    U.LastName,
+    U.Phone,
+    R.RoleName AS RoleName,
+    U.IsActive,
+    U.LastLogin,
+    U.CreatedAt,
+    U.UpdatedAt
+FROM Users U
+JOIN [dbo].[roles] R ON U.roleid = R.id
+WHERE @Term IS NULL OR U.Email LIKE @Term OR U.FirstName LIKE @Term OR U.LastName LIKE @Term
+ORDER BY U.Id
 OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY";
         const string countSql = @"SELECT COUNT(1)
-FROM Users
-WHERE @Term IS NULL OR Email LIKE @Term OR FirstName LIKE @Term OR LastName LIKE @Term";
+FROM Users U
+WHERE @Term IS NULL OR U.Email LIKE @Term OR U.FirstName LIKE @Term OR U.LastName LIKE @Term";
 
         var offset = (searchQuery.PageNumber - 1) * searchQuery.PageSize;
 
@@ -93,10 +120,13 @@ WHERE @Term IS NULL OR Email LIKE @Term OR FirstName LIKE @Term OR LastName LIKE
     public async Task<int> CreateAsync(UserEntity user)
     {
         const string sql = @"INSERT INTO Users
-(Username, Email, Password, FirstName, LastName, Phone, RoleName, IsActive, LastLogin, CreatedAt, UpdatedAt)
+(Username, Email, Password, FirstName, LastName, Phone, RoleId, IsActive, LastLogin, CreatedAt, UpdatedAt)
 OUTPUT INSERTED.Id
 VALUES
-(@Username, @Email, @Password, @FirstName, @LastName, @Phone, @RoleName, @IsActive, @LastLogin, @CreatedAt, @UpdatedAt)";
+(@Username, @Email, @Password, @FirstName, @LastName, @Phone,
+ COALESCE((SELECT TOP 1 Id FROM [dbo].[roles] WHERE LOWER(RoleName) = LOWER(@RoleName)),
+          (SELECT TOP 1 Id FROM [dbo].[roles] WHERE LOWER(RoleName) = 'patient')),
+ @IsActive, @LastLogin, @CreatedAt, @UpdatedAt)";
 
         return await ExecuteWithConnectionAsync(
             async connection =>
@@ -117,7 +147,9 @@ VALUES
     {
         const string sql = @"UPDATE Users
 SET Username=@Username, Email=@Email, Password=@Password, FirstName=@FirstName, LastName=@LastName,
-    Phone=@Phone, RoleName=@RoleName, IsActive=@IsActive, LastLogin=@LastLogin, UpdatedAt=@UpdatedAt
+    Phone=@Phone,
+    RoleId=COALESCE((SELECT TOP 1 Id FROM [dbo].[roles] WHERE LOWER(RoleName) = LOWER(@RoleName)), RoleId),
+    IsActive=@IsActive, LastLogin=@LastLogin, UpdatedAt=@UpdatedAt
 WHERE Id=@Id";
 
         return await ExecuteWithConnectionAsync(
