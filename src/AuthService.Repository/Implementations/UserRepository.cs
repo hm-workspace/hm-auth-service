@@ -61,7 +61,20 @@ public class UserRepository : BaseRepository, IUserRepository
             {
                 var id = await connection.ExecuteScalarAsync<int>(
                     StoredProcedureNames.CreateUser,
-                    user,
+                    new
+                    {
+                        user.Username,
+                        user.Email,
+                        user.Password,
+                        user.FirstName,
+                        user.LastName,
+                        user.Phone,
+                        user.RoleName,
+                        user.IsActive,
+                        user.LastLogin,
+                        user.CreatedAt,
+                        user.UpdatedAt
+                    },
                     commandType: CommandType.StoredProcedure);
                 user.Id = id;
                 return id;

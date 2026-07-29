@@ -82,6 +82,22 @@ public class AuthController : ControllerBase
         var result = await _authService.RevokeTokenAsync(refreshTokenDto);
         return result.Success ? Ok(result) : BadRequest(result);
     }
+
+    [Authorize]
+    [HttpGet("health/authorization")]
+    public ActionResult<ApiResponse<object>> AuthorizationHealth()
+    {
+        var userId = User.FindFirst("sub")?.Value
+            ?? User.FindFirst("nameid")?.Value
+            ?? User.FindFirst("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier")?.Value;
+
+        return Ok(ApiResponse<object>.Ok(new
+        {
+            status = "authorized",
+            timestamp = DateTime.UtcNow,
+            userId
+        }, "Authorization is valid."));
+    }
 }
 
 [Authorize]
